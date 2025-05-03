@@ -1,123 +1,148 @@
 import { StatusBar } from "expo-status-bar";
-import { StyleSheet, Text, View, Button, Image, Alert } from "react-native";
-import * as ImagePicker from "expo-image-picker";
-import * as MediaLibrary from "expo-media-library";
-import { Camera } from "expo-camera";
+import {
+  StyleSheet,
+  Text,
+  View,
+  Button,
+  Image,
+  Alert,
+  Platform,
+} from "react-native";
 import { useState } from "react";
-import RNFS from "react-native-fs";
+import * as ImagePicker from "expo-image-picker";
+import * as FileSystem from "expo-file-system";
+import * as MediaLibrary from "expo-media-library";
 
 export default function App() {
-  const [url, setUrl] = useState("");
-  const [savedFilePath, setSavedFilePath] = useState("");
+  const [uri, setUri] = useState("");
 
   const openImagePicker = async () => {
-    const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ImagePicker.MediaTypeOptions.Images,
-      allowsEditing: true,
-      quality: 1,
-    });
-
-    if (!result.canceled) {
-      setUrl(result.uri);
-    }
-  };
-
-  const requestCameraPermission = async () => {
-    const { status } = await Camera.requestCameraPermissionsAsync();
-    if (status === "granted") {
-      const result = await ImagePicker.launchCameraAsync({
-        mediaTypes: ImagePicker.MediaTypeOptions.Images,
-        allowsEditing: true,
-        quality: 1,
-      });
-
-      if (!result.canceled) {
-        setUrl(result.uri);
-      }
-    } else {
-      console.log("Camera permission denied");
-    }
-  };
-
-  const saveImageToDevice = async () => {
-    if (!url) {
-      Alert.alert("Error", "Please select or capture an image first");
+    // Request permission for media library
+    const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (status !== "granted") {
+      alert("Sorry, we need camera roll permissions to make this work!");
       return;
     }
 
-    try {
-      // Request permissions for accessing media library
-      const { status } = await MediaLibrary.requestPermissionsAsync();
-      if (status !== "granted") {
-        Alert.alert(
-          "Permission Denied",
-          "Need permission to save images to gallery"
-        );
-        return;
-      }
+    // Launch image library
+    let result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      allowsEditing: true,
+      aspect: [4, 3],
+      quality: 1,
+    });
 
-      // Generate a unique filename
-      const fileName = `image_${new Date().getTime()}.jpg`;
+    handleResponse(result);
+  };
 
-      // Save the image to media library (Pictures folder)
-      const asset = await MediaLibrary.createAssetAsync(url);
+  const handleCameraLaunch = async () => {
+    // Launch camera directly after permission is granted
+    let result = await ImagePicker.launchCameraAsync({
+      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      allowsEditing: true,
+      aspect: [4, 3],
+      quality: 1,
+    });
 
-      // Create an album named after the app to organize the pictures
-      const album = await MediaLibrary.getAlbumAsync(
-        "FikriNaufalAndrasito_79229_WEEK9"
-      );
-      if (album === null) {
-        await MediaLibrary.createAlbumAsync(
-          "FikriNaufalAndrasito_79229_WEEK9",
-          asset,
-          false
-        );
-      } else {
-        await MediaLibrary.addAssetsToAlbumAsync([asset], album, false);
-      }
+    handleResponse(result);
+  };
 
-      setSavedFilePath(asset.uri);
-      Alert.alert("Success", `Image saved to Pictures folder!`);
+  const requestCameraPermission = async () => {
+    // Request camera permission
+    const { status } = await ImagePicker.requestCameraPermissionsAsync();
+    if (status !== "granted") {
+      alert("Sorry, we need camera permissions to make this work!");
+      return;
+    }
 
-      console.log("Image saved to Pictures:", asset);
-    } catch (error) {
-      console.error("Error saving image:", error);
-      Alert.alert("Error", "Failed to save image to Pictures folder");
+    // If permission granted, launch camera
+    handleCameraLaunch();
+  };
+
+  const handleResponse = (result) => {
+    if (result.canceled) {
+      console.log("User cancelled image picker");
+    } else if (result.assets && result.assets[0] && result.assets[0].uri) {
+      console.log("Image: ", result.assets[0].uri);
+      setUri(result.assets[0].uri);
+    } else {
+      console.log("No assets found in the response");
     }
   };
 
   const saveFile = async () => {
-    const path = RNFS.DownloadDirectoryPath + "/test.txt";
-    RNFS.writeFile(path, "Lorem ipsum dolor sit amet", "utf8")
-      .then((res) => {
-        console.log("Success create file. Check your download folder");
-        Alert.alert("Success", "File created in downloads folder");
-      })
-      .catch((err) => {
-        console.error(err);
-        Alert.alert("Error", "Failed to create file");
-      });
+    try {
+      const fileUri = FileSystem.documentDirectory + "test.txt";
+      await FileSystem.writeAsStringAsync(
+        fileUri,
+        "Lorem ipsum dolor sit amet",
+        { encoding: FileSystem.EncodingType.UTF8 }
+      );
+      console.log("Success create file at:", fileUri);
+      Alert.alert("Success", "File created successfully! Path: " + fileUri);
+    } catch (err) {
+      console.error(err);
+      Alert.alert("Error", "Failed to create file: " + err.message);
+    }
+  };
+
+  const saveImageFile = async () => {
+    if (!uri) {
+      Alert.alert("Error", "No image selected");
+      return;
+    }
+
+    try {
+      // First, request permission to save to media library
+      const { status } = await MediaLibrary.requestPermissionsAsync();
+      if (status !== "granted") {
+        Alert.alert(
+          "Permission needed",
+          "Please grant permission to save images to your gallery"
+        );
+        return;
+      }
+
+      // Generate a unique filename like "rn_image_picker_1234567890.jpg"
+      const filename = `rn_image_picker_${new Date().getTime()}.jpg`;
+
+      // Create a temporary copy in FileSystem if needed
+      let asset;
+
+      // Save to media library (Photos/Gallery)
+      asset = await MediaLibrary.createAssetAsync(uri);
+
+      // Get album named "Pictures" or create it if it doesn't exist
+      const album = await MediaLibrary.getAlbumAsync("Pictures");
+
+      if (album === null) {
+        // Create "Pictures" album if it doesn't exist
+        await MediaLibrary.createAlbumAsync("Pictures", asset, false);
+      } else {
+        // Add to existing "Pictures" album
+        await MediaLibrary.addAssetsToAlbumAsync([asset], album, false);
+      }
+
+      console.log("Image saved to Pictures folder:", asset.uri);
+      Alert.alert("Success", "Image saved successfully to Pictures folder");
+    } catch (err) {
+      console.error(err);
+      Alert.alert("Error", "Failed to save image: " + err.message);
+    }
   };
 
   return (
     <View style={styles.container}>
-      <Text>Camera & Image Picker Demo</Text>
-      <Text>Fikri Naufal Andrasito - 0000079229</Text>
-      <Button title="Open Gallery" onPress={openImagePicker} />
-      <Button title="Open Camera" onPress={requestCameraPermission} />
-      <Button title="Save Test File" onPress={saveFile} color="#4CAF50" />
-      {url ? (
-        <>
-          <Image source={{ uri: url }} style={styles.image} />
-          <Button
-            title="Save Image"
-            onPress={saveImageToDevice}
-            color="#007AFF"
-          />
-        </>
-      ) : null}
-      {savedFilePath ? (
-        <Text style={styles.savedText}>Image saved to Pictures folder</Text>
+      <Text style={styles.title}>Image Picker</Text>
+      <Text style={styles.title}>Fikri Naufal Andrasito - 00000079229</Text>
+      <Button title="Pick an image from gallery" onPress={openImagePicker} />
+      <Button title="Take a photo" onPress={requestCameraPermission} />
+      <Button title="Save Text File" onPress={saveFile} />
+      {uri ? (
+        <View style={styles.imageContainer}>
+          <Image source={{ uri }} style={styles.image} />
+          <Button title="Save Image to Pictures" onPress={saveImageFile} />
+        </View>
       ) : null}
       <StatusBar style="auto" />
     </View>
@@ -130,19 +155,24 @@ const styles = StyleSheet.create({
     backgroundColor: "#fff",
     alignItems: "center",
     justifyContent: "center",
-    padding: 20,
+    gap: 10,
+    padding: 16,
+  },
+  title: {
+    fontSize: 20,
+    fontWeight: "bold",
+    marginBottom: 5,
+  },
+  imageContainer: {
+    alignItems: "center",
+    marginTop: 20,
+    width: "100%",
   },
   image: {
     width: 300,
     height: 300,
-    marginTop: 20,
-    borderRadius: 10,
-  },
-  savedText: {
     marginTop: 10,
-    fontSize: 12,
-    color: "green",
-    textAlign: "center",
-    paddingHorizontal: 20,
+    marginBottom: 10,
+    borderRadius: 8,
   },
 });
